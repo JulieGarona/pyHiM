@@ -774,7 +774,7 @@ def _safe_region_axis_lengths(region):
     return minor_axis, major_axis
 
 
-def _safe_region_centroid(region):
+def _safe_region_centroid(region, stats=None):
     """Return a finite (z, y, x) centroid whose rounded voxel is in the bbox.
 
     Signed intensities (e.g. cubic interpolation undershoot) can place a
@@ -794,10 +794,8 @@ def _safe_region_centroid(region):
     ):
         return centroid
 
-    print_log(
-        f"$ Warning: invalid weighted centroid for label {region.label}: "
-        f"{centroid.tolist()}, bbox={region.bbox}; using geometric centroid."
-    )
+    if stats is not None:
+        stats["geometric"] += 1
     return np.asarray(region.centroid, dtype=float)
 
 
@@ -821,9 +819,15 @@ def get_mask_properties_advanced(segmented_image_3d, image_3d_aligned):
     properties = regionprops(segmented_image_3d, intensity_image=image_3d_aligned)
 
     if len(properties) == 0:
+        print_log("$ Centroids: 0/0 replaced by geometric centroids.")
         return ([], [], [], [], [], [], [], [], [])
 
-    centroids = [_safe_region_centroid(p) for p in properties]
+    centroid_stats = {"geometric": 0}
+    centroids = [_safe_region_centroid(p, stats=centroid_stats) for p in properties]
+    print_log(
+        f"$ Centroids: {centroid_stats['geometric']}/{len(properties)} "
+        "replaced by geometric centroids."
+    )
 
     bbox = [p.bbox for p in properties]
     area = [p.area for p in properties]
