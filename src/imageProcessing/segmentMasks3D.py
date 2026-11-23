@@ -20,7 +20,6 @@ import os
 from datetime import datetime
 
 import numpy as np
-from scipy.ndimage import label
 from skimage import io
 
 from core.data_manager import create_folder
@@ -29,7 +28,10 @@ from core.pyhim_logging import print_log, print_session_name, write_string_to_fi
 from core.saving import plot_raw_images_and_labels
 from imageProcessing.alignImages import apply_shift_3d_images
 from imageProcessing.makeProjections import reinterpolate_z
-from imageProcessing.segmentMasks import _segment_3d_masks
+from imageProcessing.segmentMasks import (
+    _deblend_3d_segmentation_advanced,
+    _segment_3d_masks,
+)
 
 # =============================================================================
 # CLASSES
@@ -144,6 +146,9 @@ class Mask3D:
         # segments 3D volumes
         _, segmented_image_3d = self._segment_3d_volumes(image_3d, seg_params, label)
 
+        # Use the same two-step watershed as localize_3d. Keep its instance
+        # labels: connected-component relabeling would merge touching masks.
+        segmented_image_3d = _deblend_3d_segmentation_advanced(segmented_image_3d)
         number_masks = np.max(segmented_image_3d)
         print_log(f"$ Number of masks detected: {number_masks}")
 
@@ -180,10 +185,6 @@ class Mask3D:
             print_log(f"\t2D:{npy_labeled_image_filename_2d}")
             print_log(f"\t3D:{npy_labeled_image_filename_3d}")
 
-            # relabels masks with a unique ID
-            segmented_image_3d = relabel_masks(
-                segmented_image_3d, connectivity=3, distance=3
-            )
             # saves 3D image
             np.save(npy_labeled_image_filename_3d, segmented_image_3d)
 
@@ -526,35 +527,3 @@ def plot_image_3d(image_3d, masks):
     """
 
     return plot_raw_images_and_labels(image_3d, masks)
-
-
-def relabel_masks(labeled_img, connectivity=3, distance=3):
-    """
-    Corrects a labeled mask image by applying watershed segmentation to separate fused masks
-    and relabeling connected components to ensure consistency.
-
-    Parameters:
-    -----------
-    labeled_img : ndarray
-        The input labeled image where each object has a unique label.
-    connectivity : int, optional
-        The connectivity for defining connected components (1=4-connectivity, 2=8-connectivity).
-
-    Returns:
-    --------
-    corrected_labels : ndarray
-        The relabeled mask image where touching masks are separated.
-    """
-    # Count original labels
-    original_labels = np.max(labeled_img)
-
-    # rename labels
-    corrected_labels, _ = label(
-        labeled_img, structure=np.ones((3, 3, 3)), output=np.int32
-    )
-
-    # Count new labels
-    new_labels = np.max(corrected_labels)
-
-    print(f"Original masks: {original_labels}\nNew labels: {new_labels}")
-    return corrected_labels

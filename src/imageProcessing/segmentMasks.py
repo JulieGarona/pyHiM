@@ -1076,6 +1076,20 @@ def _deblend_3d_segmentation(binary):
     return labels
 
 
+def _watershed_markers(distance, binary, coords):
+    """Build peak markers, retaining components with no detected peak."""
+    marker_mask = np.zeros(distance.shape, dtype=bool)
+    marker_mask[tuple(coords.T)] = True
+    components, count = ndi.label(binary)
+    seeded_components = np.unique(components[marker_mask])
+    missing = np.setdiff1d(np.arange(1, count + 1), seeded_components)
+    if missing.size:
+        positions = ndi.maximum_position(distance, labels=components, index=missing)
+        marker_mask[tuple(np.asarray(positions).T)] = True
+    markers, _ = ndi.label(marker_mask)
+    return markers
+
+
 def _deblend_3d_segmentation_advanced(binary):
     """
     Split touching 3D objects using a two-step watershed approach.
@@ -1083,6 +1097,10 @@ def _deblend_3d_segmentation_advanced(binary):
     Steps:
     1. Global watershed on distance transform to separate main objects.
     2. Refined watershed on elongated objects to split merged spots.
+
+    Shared by localize_3d and mask_3d. Input instance labels are discarded;
+    splitting depends on the geometry of the foreground, not its intensity.
+    Each connected component receives a marker even if peak detection misses it.
 
     Parameters
     ----------
@@ -1098,6 +1116,9 @@ def _deblend_3d_segmentation_advanced(binary):
     print_log(" > Constructing distance matrix from 3D binary mask...")
     binary = binary > 0
 
+    if not np.any(binary):
+        return np.zeros(binary.shape, dtype=np.int32)
+
     # First watershed
     print_log(" > Deblending sources in 3D by watersheding (part 1)...")
     distance = apply_parallel(ndi.distance_transform_edt, binary)
@@ -1110,7 +1131,7 @@ def _deblend_3d_segmentation_advanced(binary):
     )
 
     peak_values = distance[tuple(coords_1.T)]
-    min_dist = int(np.median(peak_values))
+    min_dist = max(1, int(np.median(peak_values))) if peak_values.size else 1
 
     coords_2 = peak_local_max(
         distance,
@@ -1120,10 +1141,7 @@ def _deblend_3d_segmentation_advanced(binary):
         exclude_border=True,
     )
 
-    marker_mask = np.zeros(distance.shape, dtype=bool)
-    marker_mask[tuple(coords_2.T)] = True
-
-    markers, _ = ndi.label(marker_mask)
+    markers = _watershed_markers(distance, binary, coords_2)
 
     initial_labels = watershed(-distance, markers, mask=binary)
 
@@ -1139,14 +1157,17 @@ def _deblend_3d_segmentation_advanced(binary):
         try:
             minor_axis = region.axis_minor_length
         except ValueError:
+            regular_labels.append(region.label)
             continue
 
         try:
             major_axis = region.axis_major_length
         except ValueError:
+            regular_labels.append(region.label)
             continue
 
-        if not np.isfinite(minor_axis) or minor_axis <= 0:
+        if not np.isfinite(minor_axis) or minor_axis <= 0 or not np.isfinite(major_axis):
+            regular_labels.append(region.label)
             continue
 
         elongation = major_axis / minor_axis
@@ -1161,13 +1182,10 @@ def _deblend_3d_segmentation_advanced(binary):
         elongated_mask = np.isin(initial_labels, elongated_labels)
         regular_mask = np.isin(initial_labels, regular_labels)
 
-        normal_mask_labeled = label(regular_mask)
-        normal_mask_props = regionprops(normal_mask_labeled)
-
         normal_size_object = []
 
-        for p in normal_mask_props:
-            if p.area < 50:
+        for p in region_properties:
+            if p.label not in regular_labels or p.area < 50:
                 continue
 
             diameter = p.axis_major_length
@@ -1175,7 +1193,11 @@ def _deblend_3d_segmentation_advanced(binary):
 
             normal_size_object.append(rayon)
 
-        footprint_values = round(np.mean(normal_size_object))
+        # There may be only elongated objects, with no regular-size reference.
+        footprint_values = (
+            max(1, round(np.mean(normal_size_object)))
+            if normal_size_object else min_dist
+        )
 
         # Second watershed (elongated objects only)
         elongated_distance = ndi.distance_transform_edt(elongated_mask)
@@ -1194,10 +1216,9 @@ def _deblend_3d_segmentation_advanced(binary):
             exclude_border=True,
         )
 
-        elongated_mask_markers = np.zeros(elongated_distance.shape, dtype=bool)
-        elongated_mask_markers[tuple(elongated_peaks.T)] = True
-
-        elongated_markers, _ = ndi.label(elongated_mask_markers)
+        elongated_markers = _watershed_markers(
+            elongated_distance, elongated_mask, elongated_peaks
+        )
 
         corrected_elongated_labels = watershed(
             -elongated_distance,
