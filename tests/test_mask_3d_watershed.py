@@ -59,6 +59,8 @@ def test_mask_file_saves_watershed_labels_without_merging(tmp_path, monkeypatch)
         lambda *args: (foreground, foreground.astype(np.int32)),
     )
     monkeypatch.setattr(segmentMasks3D, "plot_image_3d", Mock(return_value=Mock()))
+    deblend = Mock(wraps=segmentMasks._deblend_3d_segmentation_advanced)
+    monkeypatch.setattr(segmentMasks3D, "_deblend_3d_segmentation_advanced", deblend)
     (tmp_path / "mask_3d" / "data").mkdir(parents=True)
     seg_params = SimpleNamespace(mask_2d_folder="mask_2d", mask_3d_folder="mask_3d")
     processor.segment_masks_3d_file(
@@ -70,3 +72,17 @@ def test_mask_file_saves_watershed_labels_without_merging(tmp_path, monkeypatch)
     np.testing.assert_array_equal(saved > 0, foreground)
     projection = np.load(tmp_path / "mask_2d" / "data" / "test_mask0_Masks.npy")
     np.testing.assert_array_equal(projection, saved.max(axis=0))
+    assert deblend.call_args.kwargs == {"second_pass": False}
+
+
+def test_single_pass_separates_joined_objects_without_refinement(monkeypatch):
+    def unexpected_refinement(*args, **kwargs):
+        raise AssertionError("A single watershed must not inspect elongated objects")
+
+    monkeypatch.setattr(segmentMasks, "regionprops", unexpected_refinement)
+    foreground = joined_objects()
+    labels = segmentMasks._deblend_3d_segmentation_advanced(
+        foreground, second_pass=False,
+    )
+    assert labels[20, 18, 24] != labels[20, 40, 24]
+    np.testing.assert_array_equal(labels > 0, foreground)

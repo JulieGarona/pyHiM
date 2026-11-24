@@ -1090,7 +1090,7 @@ def _watershed_markers(distance, binary, coords):
     return markers
 
 
-def _deblend_3d_segmentation_advanced(binary):
+def _deblend_3d_segmentation_advanced(binary, second_pass=True):
     """
     Split touching 3D objects using a two-step watershed approach.
 
@@ -1106,6 +1106,9 @@ def _deblend_3d_segmentation_advanced(binary):
     ----------
     binary : ndarray (3D)
         Binary mask of objects.
+    second_pass : bool, optional
+        Refine elongated objects after the first watershed. Default: True.
+        mask_3d disables this refinement; localize_3d keeps both passes.
 
     Returns
     -------
@@ -1144,6 +1147,10 @@ def _deblend_3d_segmentation_advanced(binary):
     markers = _watershed_markers(distance, binary, coords_2)
 
     initial_labels = watershed(-distance, markers, mask=binary)
+
+    if not second_pass:
+        print_log(" > Skipping watershed refinement of elongated objects (part 2).")
+        return initial_labels
 
     # Second watershed
     print_log(" > Deblending sources in 3D by watersheding (part 2)...")

@@ -37,10 +37,12 @@ _Warning_: This mode operates in 3D, therefore the Startdist network provided *
 
 ## Separating touching objects
 
-After StarDist prediction, `mask_3d` applies the same two-step watershed as
-`localize_3d`. The first step uses peaks in the foreground distance transform
-as markers. The second step refines elongated objects with a major/minor axis
-ratio of at least 2.5. The resulting instance labels are saved directly,
+After StarDist prediction, `mask_3d` applies **only the first watershed pass**
+of the implementation shared with `localize_3d`. It uses peaks in the foreground
+distance transform as markers. The first-pass seed detection settings are
+unchanged. The second pass, which subdivides elongated objects, is skipped
+for masks to test whether a single pass provides sufficient separation.
+`localize_3d` continues to use both passes. The resulting instance labels are saved directly,
 without connected-component relabeling that would merge touching objects.
 
 This procedure recomputes labels from the binary foreground: it does not

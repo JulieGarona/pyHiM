@@ -146,9 +146,11 @@ class Mask3D:
         # segments 3D volumes
         _, segmented_image_3d = self._segment_3d_volumes(image_3d, seg_params, label)
 
-        # Use the same two-step watershed as localize_3d. Keep its instance
+        # Use only the first watershed for library masks. Keep its instance
         # labels: connected-component relabeling would merge touching masks.
-        segmented_image_3d = _deblend_3d_segmentation_advanced(segmented_image_3d)
+        segmented_image_3d = _deblend_3d_segmentation_advanced(
+            segmented_image_3d, second_pass=False
+        )
         number_masks = np.max(segmented_image_3d)
         print_log(f"$ Number of masks detected: {number_masks}")
 
